@@ -131,11 +131,11 @@ export const isOwnerOrAdmin = (getResourceUserId: (req: AuthenticatedRequest) =>
 export const generateTokens = (payload: Omit<TokenPayload, 'iat' | 'exp'>) => {
   const accessToken = jwt.sign(payload, config.JWT_SECRET, {
     expiresIn: config.JWT_EXPIRES_IN,
-  });
+  } as jwt.SignOptions);
 
   const refreshToken = jwt.sign(payload, config.JWT_REFRESH_SECRET, {
     expiresIn: config.JWT_REFRESH_EXPIRES_IN,
-  });
+  } as jwt.SignOptions);
 
   return { accessToken, refreshToken };
 };
