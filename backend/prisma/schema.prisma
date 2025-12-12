@@ -1,0 +1,317 @@
+// Prisma Schema für Dog-Walking-Plattform
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// Benutzer-Rolle
+enum UserRole {
+  CUSTOMER
+  WALKER
+  ADMIN
+}
+
+// Buchungsstatus
+enum BookingStatus {
+  PENDING
+  CONFIRMED
+  IN_PROGRESS
+  COMPLETED
+  CANCELLED
+}
+
+// Gruppentermin-Status
+enum GroupWalkStatus {
+  OPEN
+  FULL
+  IN_PROGRESS
+  COMPLETED
+  CANCELLED
+}
+
+// Benutzer (Kunden, Walker, Admins)
+model User {
+  id              String    @id @default(cuid())
+  email           String    @unique
+  passwordHash    String
+  firstName       String
+  lastName        String
+  phone           String?
+  role            UserRole  @default(CUSTOMER)
+  isActive        Boolean   @default(true)
+  emailVerified   Boolean   @default(false)
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  // Beziehungen
+  addresses       Address[]
+  dogs            Dog[]
+  bookingsAsCustomer Booking[] @relation("CustomerBookings")
+  walkerProfile   WalkerProfile?
+  refreshTokens   RefreshToken[]
+  notifications   Notification[]
+
+  @@index([email])
+  @@index([role])
+}
+
+// Walker-Profil (erweiterte Daten für Walker)
+model WalkerProfile {
+  id              String    @id @default(cuid())
+  userId          String    @unique
+  user            User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  bio             String?
+  experience      Int       @default(0) // Jahre Erfahrung
+  maxDogs         Int       @default(4) // Maximale Hunde pro Spaziergang
+  hourlyRate      Decimal   @db.Decimal(10, 2)
+  rating          Decimal   @default(0) @db.Decimal(3, 2)
+  totalReviews    Int       @default(0)
+  isAvailable     Boolean   @default(true)
+  serviceRadius   Int       @default(5) // Radius in km
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  // Beziehungen
+  availabilities  WalkerAvailability[]
+  serviceAreas    ServiceArea[]
+  bookings        Booking[] @relation("WalkerBookings")
+  groupWalks      GroupWalk[]
+  reviews         Review[]
+
+  @@index([isAvailable])
+  @@index([rating])
+}
+
+// Walker-Verfügbarkeit
+model WalkerAvailability {
+  id              String    @id @default(cuid())
+  walkerProfileId String
+  walkerProfile   WalkerProfile @relation(fields: [walkerProfileId], references: [id], onDelete: Cascade)
+  dayOfWeek       Int       // 0-6 (Sonntag-Samstag)
+  startTime       String    // HH:mm Format
+  endTime         String    // HH:mm Format
+  isActive        Boolean   @default(true)
+
+  @@unique([walkerProfileId, dayOfWeek, startTime, endTime])
+  @@index([walkerProfileId])
+}
+
+// Service-Gebiete für Walker
+model ServiceArea {
+  id              String    @id @default(cuid())
+  walkerProfileId String
+  walkerProfile   WalkerProfile @relation(fields: [walkerProfileId], references: [id], onDelete: Cascade)
+  postalCode      String
+  city            String
+  latitude        Decimal   @db.Decimal(10, 8)
+  longitude       Decimal   @db.Decimal(11, 8)
+
+  @@unique([walkerProfileId, postalCode])
+  @@index([postalCode])
+  @@index([walkerProfileId])
+}
+
+// Adressen
+model Address {
+  id              String    @id @default(cuid())
+  userId          String
+  user            User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  street          String
+  houseNumber     String
+  postalCode      String
+  city            String
+  country         String    @default("Deutschland")
+  latitude        Decimal?  @db.Decimal(10, 8)
+  longitude       Decimal?  @db.Decimal(11, 8)
+  isDefault       Boolean   @default(false)
+  label           String?   // z.B. "Zuhause", "Arbeit"
+  notes           String?   // Besondere Hinweise
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  // Beziehungen
+  bookings        Booking[]
+  groupWalkParticipations GroupWalkParticipant[]
+
+  @@index([userId])
+  @@index([postalCode])
+  @@index([latitude, longitude])
+}
+
+// Hunde
+model Dog {
+  id              String    @id @default(cuid())
+  ownerId         String
+  owner           User      @relation(fields: [ownerId], references: [id], onDelete: Cascade)
+  name            String
+  breed           String
+  age             Int       // in Jahren
+  weight          Decimal   @db.Decimal(5, 2) // in kg
+  size            String    // klein, mittel, groß
+  temperament     String?   // z.B. "freundlich", "schüchtern"
+  specialNeeds    String?
+  isVaccinated    Boolean   @default(true)
+  isNeutered      Boolean   @default(false)
+  photoUrl        String?
+  notes           String?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  // Beziehungen
+  bookings        BookingDog[]
+  groupWalkParticipations GroupWalkDog[]
+
+  @@index([ownerId])
+}
+
+// Buchungen
+model Booking {
+  id              String        @id @default(cuid())
+  customerId      String
+  customer        User          @relation("CustomerBookings", fields: [customerId], references: [id], onDelete: Cascade)
+  walkerId        String?
+  walker          WalkerProfile? @relation("WalkerBookings", fields: [walkerId], references: [id], onDelete: SetNull)
+  addressId       String
+  address         Address       @relation(fields: [addressId], references: [id])
+  scheduledDate   DateTime
+  duration        Int           // in Minuten
+  status          BookingStatus @default(PENDING)
+  totalPrice      Decimal       @db.Decimal(10, 2)
+  notes           String?
+  cancellationReason String?
+  groupWalkId     String?       // Falls Teil eines Gruppentermins
+  groupWalk       GroupWalk?    @relation(fields: [groupWalkId], references: [id], onDelete: SetNull)
+  createdAt       DateTime      @default(now())
+  updatedAt       DateTime      @updatedAt
+
+  // Beziehungen
+  dogs            BookingDog[]
+  review          Review?
+
+  @@index([customerId])
+  @@index([walkerId])
+  @@index([scheduledDate])
+  @@index([status])
+  @@index([groupWalkId])
+}
+
+// Buchung-Hund Verknüpfung
+model BookingDog {
+  id              String    @id @default(cuid())
+  bookingId       String
+  booking         Booking   @relation(fields: [bookingId], references: [id], onDelete: Cascade)
+  dogId           String
+  dog             Dog       @relation(fields: [dogId], references: [id], onDelete: Cascade)
+
+  @@unique([bookingId, dogId])
+}
+
+// Gruppenspaziergänge
+model GroupWalk {
+  id              String          @id @default(cuid())
+  walkerId        String
+  walker          WalkerProfile   @relation(fields: [walkerId], references: [id], onDelete: Cascade)
+  title           String
+  description     String?
+  meetingPoint    String
+  meetingLat      Decimal         @db.Decimal(10, 8)
+  meetingLng      Decimal         @db.Decimal(11, 8)
+  scheduledDate   DateTime
+  duration        Int             // in Minuten
+  maxParticipants Int             @default(6)
+  currentParticipants Int         @default(0)
+  pricePerDog     Decimal         @db.Decimal(10, 2)
+  status          GroupWalkStatus @default(OPEN)
+  createdAt       DateTime        @default(now())
+  updatedAt       DateTime        @updatedAt
+
+  // Beziehungen
+  participants    GroupWalkParticipant[]
+  dogs            GroupWalkDog[]
+  bookings        Booking[]
+
+  @@index([walkerId])
+  @@index([scheduledDate])
+  @@index([status])
+  @@index([meetingLat, meetingLng])
+}
+
+// Gruppentermin-Teilnehmer
+model GroupWalkParticipant {
+  id              String    @id @default(cuid())
+  groupWalkId     String
+  groupWalk       GroupWalk @relation(fields: [groupWalkId], references: [id], onDelete: Cascade)
+  addressId       String
+  address         Address   @relation(fields: [addressId], references: [id])
+  joinedAt        DateTime  @default(now())
+
+  @@unique([groupWalkId, addressId])
+}
+
+// Gruppentermin-Hunde
+model GroupWalkDog {
+  id              String    @id @default(cuid())
+  groupWalkId     String
+  groupWalk       GroupWalk @relation(fields: [groupWalkId], references: [id], onDelete: Cascade)
+  dogId           String
+  dog             Dog       @relation(fields: [dogId], references: [id], onDelete: Cascade)
+
+  @@unique([groupWalkId, dogId])
+}
+
+// Bewertungen
+model Review {
+  id              String    @id @default(cuid())
+  bookingId       String    @unique
+  booking         Booking   @relation(fields: [bookingId], references: [id], onDelete: Cascade)
+  walkerId        String
+  walker          WalkerProfile @relation(fields: [walkerId], references: [id], onDelete: Cascade)
+  rating          Int       // 1-5
+  comment         String?
+  createdAt       DateTime  @default(now())
+
+  @@index([walkerId])
+  @@index([rating])
+}
+
+// Refresh Tokens
+model RefreshToken {
+  id              String    @id @default(cuid())
+  userId          String
+  user            User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  token           String    @unique
+  expiresAt       DateTime
+  createdAt       DateTime  @default(now())
+
+  @@index([userId])
+  @@index([token])
+}
+
+// Benachrichtigungen
+model Notification {
+  id              String    @id @default(cuid())
+  userId          String
+  user            User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  title           String
+  message         String
+  type            String    // booking, reminder, system
+  isRead          Boolean   @default(false)
+  data            Json?     // Zusätzliche Daten
+  createdAt       DateTime  @default(now())
+
+  @@index([userId])
+  @@index([isRead])
+}
+
+// Systemkonfiguration
+model SystemConfig {
+  id              String    @id @default(cuid())
+  key             String    @unique
+  value           String
+  description     String?
+  updatedAt       DateTime  @updatedAt
+}
