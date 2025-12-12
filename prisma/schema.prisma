@@ -1,0 +1,493 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ============================================
+// USER & AUTHENTICATION
+// ============================================
+
+enum UserRole {
+  ADMIN
+  WALKER
+  CUSTOMER
+}
+
+model User {
+  id             String    @id @default(cuid())
+  email          String    @unique
+  emailVerified  DateTime?
+  password       String?
+  name           String
+  phone          String?
+  role           UserRole  @default(CUSTOMER)
+  image          String?
+  isActive       Boolean   @default(true)
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  // Relations
+  accounts       Account[]
+  sessions       Session[]
+  customer       Customer?
+  walker         Walker?
+  notifications  Notification[]
+
+  @@map("users")
+}
+
+model Account {
+  id                 String  @id @default(cuid())
+  userId             String
+  type               String
+  provider           String
+  providerAccountId  String
+  refresh_token      String?  @db.Text
+  access_token       String?  @db.Text
+  expires_at         Int?
+  token_type         String?
+  scope              String?
+  id_token           String?  @db.Text
+  session_state      String?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, providerAccountId])
+  @@map("accounts")
+}
+
+model Session {
+  id           String   @id @default(cuid())
+  sessionToken String   @unique
+  userId       String
+  expires      DateTime
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("sessions")
+}
+
+model VerificationToken {
+  identifier String
+  token      String   @unique
+  expires    DateTime
+
+  @@unique([identifier, token])
+  @@map("verification_tokens")
+}
+
+// ============================================
+// CUSTOMER
+// ============================================
+
+model Customer {
+  id          String   @id @default(cuid())
+  userId      String   @unique
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  // Address
+  street      String
+  houseNumber String
+  postalCode  String
+  city        String
+  latitude    Float?
+  longitude   Float?
+
+  // Additional info
+  notes       String?  @db.Text
+
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  // Relations
+  dogs        Dog[]
+  bookings    Booking[]
+  invoices    Invoice[]
+
+  @@map("customers")
+}
+
+// ============================================
+// DOG
+// ============================================
+
+enum DogSize {
+  SMALL      // < 10kg
+  MEDIUM     // 10-25kg
+  LARGE      // 25-45kg
+  EXTRA_LARGE // > 45kg
+}
+
+model Dog {
+  id            String   @id @default(cuid())
+  customerId    String
+  customer      Customer @relation(fields: [customerId], references: [id], onDelete: Cascade)
+
+  name          String
+  breed         String?
+  size          DogSize
+  birthDate     DateTime?
+  weight        Float?   // in kg
+
+  // Medical & Behavior
+  vaccinated    Boolean  @default(false)
+  neutered      Boolean  @default(false)
+  friendlyWithDogs Boolean @default(true)
+  friendlyWithPeople Boolean @default(true)
+  specialNeeds  String?  @db.Text
+  veterinarian  String?
+  vetPhone      String?
+
+  // Media
+  imageUrl      String?
+
+  isActive      Boolean  @default(true)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  // Relations
+  bookingDogs   BookingDog[]
+
+  @@map("dogs")
+}
+
+// ============================================
+// WALKER (Dog Walker / Employee)
+// ============================================
+
+model Walker {
+  id              String   @id @default(cuid())
+  userId          String   @unique
+  user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  // Employment
+  employeeNumber  String   @unique
+  startDate       DateTime
+  endDate         DateTime?
+  hourlyRate      Float
+
+  // Capabilities
+  maxDogs         Int      @default(4)  // Max dogs per walk
+  canDriveCar     Boolean  @default(false)
+
+  // Work areas (postal codes)
+  workAreas       String[] // Array of postal codes
+
+  // Availability
+  availableFrom   String   @default("08:00") // HH:mm
+  availableTo     String   @default("18:00") // HH:mm
+  workDays        Int[]    @default([1, 2, 3, 4, 5]) // 0=Sunday, 1=Monday, etc.
+
+  isActive        Boolean  @default(true)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  // Relations
+  assignedVehicle Vehicle?  @relation("AssignedVehicle")
+  walkSlots       WalkSlot[]
+
+  @@map("walkers")
+}
+
+// ============================================
+// VEHICLE
+// ============================================
+
+model Vehicle {
+  id              String   @id @default(cuid())
+  licensePlate    String   @unique
+  brand           String
+  model           String
+  year            Int
+  color           String
+
+  // Capacity
+  maxDogs         Int      @default(4)
+
+  // Status
+  isActive        Boolean  @default(true)
+  mileage         Int      @default(0)
+  lastService     DateTime?
+  nextServiceDue  DateTime?
+
+  // Insurance
+  insuranceNumber String?
+  insuranceExpiry DateTime?
+
+  notes           String?  @db.Text
+
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  // Relations
+  assignedWalkerId String?  @unique
+  assignedWalker   Walker?  @relation("AssignedVehicle", fields: [assignedWalkerId], references: [id])
+
+  @@map("vehicles")
+}
+
+// ============================================
+// SERVICES
+// ============================================
+
+enum ServiceType {
+  SINGLE_WALK      // Individual walk
+  GROUP_WALK       // Walk with other dogs (cheaper)
+  DAYCARE          // Full day care
+  PUPPY_VISIT      // Short puppy visit
+  HOME_VISIT       // Home visit for feeding etc.
+}
+
+model Service {
+  id              String      @id @default(cuid())
+  type            ServiceType @unique
+  name            String
+  description     String      @db.Text
+  durationMinutes Int         // Duration in minutes
+  basePrice       Float       // Base price in EUR
+  groupDiscount   Float       @default(0.15) // 15% discount for group walks
+
+  isActive        Boolean     @default(true)
+  createdAt       DateTime    @default(now())
+  updatedAt       DateTime    @updatedAt
+
+  // Relations
+  bookings        Booking[]
+
+  @@map("services")
+}
+
+// ============================================
+// BOOKING
+// ============================================
+
+enum BookingStatus {
+  PENDING         // Waiting for walker assignment
+  CONFIRMED       // Walker assigned and confirmed
+  WALKER_ASSIGNED // Walker assigned, waiting for acceptance
+  IN_PROGRESS     // Walk is happening
+  COMPLETED       // Walk finished
+  CANCELLED       // Cancelled by customer or admin
+  NO_SHOW         // Customer/dog was not available
+}
+
+model Booking {
+  id              String        @id @default(cuid())
+  customerId      String
+  customer        Customer      @relation(fields: [customerId], references: [id])
+  serviceId       String
+  service         Service       @relation(fields: [serviceId], references: [id])
+
+  // Scheduling
+  requestedDate   DateTime      // Requested date
+  requestedTimeStart String     // "09:00"
+  requestedTimeEnd   String     // "11:00"
+
+  // Status
+  status          BookingStatus @default(PENDING)
+
+  // Pickup address (can differ from customer address)
+  pickupStreet    String?
+  pickupHouseNumber String?
+  pickupPostalCode String?
+  pickupCity      String?
+  pickupLatitude  Float?
+  pickupLongitude Float?
+  useCustomerAddress Boolean    @default(true)
+
+  // Notes
+  customerNotes   String?       @db.Text
+  internalNotes   String?       @db.Text
+
+  // Pricing
+  totalPrice      Float
+  isPaid          Boolean       @default(false)
+
+  // Recurring
+  isRecurring     Boolean       @default(false)
+  recurringPattern String?      // "weekly", "biweekly", etc.
+  recurringEndDate DateTime?
+
+  createdAt       DateTime      @default(now())
+  updatedAt       DateTime      @updatedAt
+
+  // Relations
+  bookingDogs     BookingDog[]
+  walkSlot        WalkSlot?     @relation(fields: [walkSlotId], references: [id])
+  walkSlotId      String?
+  invoice         Invoice?      @relation(fields: [invoiceId], references: [id])
+  invoiceId       String?
+
+  @@map("bookings")
+}
+
+// Many-to-many relation: Which dogs are included in a booking
+model BookingDog {
+  id          String   @id @default(cuid())
+  bookingId   String
+  booking     Booking  @relation(fields: [bookingId], references: [id], onDelete: Cascade)
+  dogId       String
+  dog         Dog      @relation(fields: [dogId], references: [id])
+
+  // Per-dog notes for this walk
+  notes       String?  @db.Text
+
+  createdAt   DateTime @default(now())
+
+  @@unique([bookingId, dogId])
+  @@map("booking_dogs")
+}
+
+// ============================================
+// WALK SLOT (Grouped Walks)
+// ============================================
+
+enum WalkSlotStatus {
+  OPEN            // Slots available
+  FULL            // All slots filled
+  IN_PROGRESS     // Walk happening
+  COMPLETED       // Walk finished
+  CANCELLED       // Cancelled
+}
+
+model WalkSlot {
+  id              String         @id @default(cuid())
+  walkerId        String
+  walker          Walker         @relation(fields: [walkerId], references: [id])
+
+  // Timing
+  date            DateTime
+  startTime       String         // "09:00"
+  endTime         String         // "11:00"
+
+  // Capacity
+  maxDogs         Int            @default(4)
+  currentDogs     Int            @default(0)
+
+  // Status
+  status          WalkSlotStatus @default(OPEN)
+
+  // Route info
+  areaPostalCode  String         // Primary postal code for this walk
+  estimatedRoute  String?        @db.Text // JSON with route waypoints
+  actualRoute     String?        @db.Text // GPS tracked route
+
+  // Walker acceptance
+  acceptedByWalker Boolean       @default(false)
+  acceptedAt       DateTime?
+
+  // Walk execution
+  startedAt       DateTime?
+  completedAt     DateTime?
+  walkNotes       String?        @db.Text
+
+  createdAt       DateTime       @default(now())
+  updatedAt       DateTime       @updatedAt
+
+  // Relations
+  bookings        Booking[]
+
+  @@map("walk_slots")
+}
+
+// ============================================
+// INVOICE
+// ============================================
+
+enum InvoiceStatus {
+  DRAFT
+  SENT
+  PAID
+  OVERDUE
+  CANCELLED
+}
+
+model Invoice {
+  id              String        @id @default(cuid())
+  invoiceNumber   String        @unique
+  customerId      String
+  customer        Customer      @relation(fields: [customerId], references: [id])
+
+  // Dates
+  issueDate       DateTime      @default(now())
+  dueDate         DateTime
+  paidDate        DateTime?
+
+  // Amounts
+  subtotal        Float
+  tax             Float         @default(0)
+  total           Float
+
+  // Status
+  status          InvoiceStatus @default(DRAFT)
+
+  // Payment
+  paymentMethod   String?
+  paymentReference String?
+
+  notes           String?       @db.Text
+
+  createdAt       DateTime      @default(now())
+  updatedAt       DateTime      @updatedAt
+
+  // Relations
+  bookings        Booking[]
+
+  @@map("invoices")
+}
+
+// ============================================
+// NOTIFICATIONS
+// ============================================
+
+enum NotificationType {
+  BOOKING_CREATED
+  BOOKING_CONFIRMED
+  BOOKING_CANCELLED
+  WALKER_ASSIGNED
+  WALK_STARTED
+  WALK_COMPLETED
+  PAYMENT_RECEIVED
+  INVOICE_SENT
+  REMINDER
+  SYSTEM
+}
+
+model Notification {
+  id          String           @id @default(cuid())
+  userId      String
+  user        User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  type        NotificationType
+  title       String
+  message     String           @db.Text
+  link        String?          // Optional link to relevant page
+
+  isRead      Boolean          @default(false)
+  readAt      DateTime?
+
+  createdAt   DateTime         @default(now())
+
+  @@map("notifications")
+}
+
+// ============================================
+// SYSTEM SETTINGS
+// ============================================
+
+model SystemSetting {
+  id          String   @id @default(cuid())
+  key         String   @unique
+  value       String   @db.Text
+  description String?
+
+  updatedAt   DateTime @updatedAt
+
+  @@map("system_settings")
+}
