@@ -7,7 +7,7 @@ WORKDIR /app
 # Backend-Dateien kopieren
 COPY backend/package*.json ./
 COPY backend/prisma ./prisma/
-RUN npm ci
+RUN npm install
 RUN npx prisma generate
 
 COPY backend/ .
@@ -21,7 +21,7 @@ RUN addgroup -g 1001 -S nodejs && \
     adduser -S nodejs -u 1001
 
 COPY --from=builder /app/package*.json ./
-RUN npm ci --only=production && npm cache clean --force
+RUN npm install --omit=dev && npm cache clean --force
 
 COPY --from=builder /app/prisma ./prisma/
 RUN npx prisma generate
